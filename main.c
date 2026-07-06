@@ -148,10 +148,48 @@ void skip_whitespace(char** s){
   }
 }
 
+expr* make_expr(){
+  return (expr*)malloc(sizeof(expr));
+}
+
+expr* copy_expr(expr* e){
+  expr* out = make_expr();
+  out->t = e->t;
+  switch(e->t){
+    case SYMB:
+      out->name = e->name;
+      break;
+    case APPL:
+      out->fun = copy_expr(e->fun);
+      out->par = copy_expr(e->par);
+      break;
+    case DEFN:
+      out->arg = e->arg;
+      out->bod = copy_expr(e->bod);
+      break;
+  }
+  return out;
+}
+
+void free_expr(expr* e){
+  switch(e->t){
+    case SYMB:
+      break;
+    case APPL:
+      free_expr(e->fun);
+      free_expr(e->par);
+      break;
+    case DEFN:
+      free_expr(e->bod);
+      break;
+  }
+  free(e);
+}
+
 expr* parse_expr(char** s);
 
 expr* parse_expr_part(char** s){
-  expr* out = (expr*)malloc(sizeof(expr));
+  expr* out = make_expr();
   skip_whitespace(s);
   if(!**s){
     goto FAIL;
@@ -199,7 +237,7 @@ expr* parse_expr(char** s){
 
   expr* r;
   while((r = parse_expr_part(s))){
-    expr* new = (expr*)malloc(sizeof(expr));
+    expr* new = make_expr();
 
     new->t = APPL;
     new->fun = l;
@@ -210,14 +248,70 @@ expr* parse_expr(char** s){
   return l;
 }
 
+expr* substitute(expr* e, char n, expr* s){
+  if(e->t == SYMB){
+    if(e->name == n){
+      return copy_expr(s);
+    }
+    return copy_expr(e);
+  }else if(e->t == APPL){
+    expr* out = make_expr();
+    *out = *e;
+    out->fun = substitute(e->fun, n, s);
+    out->par = substitute(e->par, n, s);
+    return out;
+  }else if(e->t == DEFN){
+    if(e->arg == n){
+      return copy_expr(e);
+    }
+    expr* out = make_expr();
+    *out = *e;
+    out->bod = substitute(e->bod, n, s);
+    return out;
+  }
+  return NULL;
+}
+
+void beta_reduce(expr* e){
+  if(e->t != APPL || e->fun->t != DEFN){
+    return;
+  }
+
+  expr* en = substitute(e->fun->bod, e->fun->arg, e->par);
+  free_expr(e->fun);
+  free_expr(e->par); // don't free e itself because we assign to it!
+  *e = *en;
+  free(en);
+}
+
+int greedy_eval(expr* e){
+  if(e->t == SYMB){
+    return 0;
+  }else if(e->t == APPL){
+    if(e->fun->t == DEFN){
+      beta_reduce(e);
+      return 1;
+    }
+    if(greedy_eval(e->fun)) return 1;
+    if(greedy_eval(e->par)) return 1;
+  }else{
+    if(greedy_eval(e->bod)) return 1;
+  }
+  return 0;
+}
+
 int main(){
   SDL_Init(SDL_INIT_VIDEO);
   SDL_CreateWindowAndRenderer(400, 400, 0, &w, &r);
 
   char* fib = "\\n.\\f.n(\\c.\\a.\\b.c b(\\x.a (b x)))(\\x.\\y.x)(\\x.x)f";
   char* omega = "(\\x.xx)(\\x.xx)";
+  char* trivial = "(\\y.(\\x.x)y)";
+  char* ycomb = "\\f.(\\x.x x)(\\x.f(x x))";
+  char* oneplustwo = "(\\a.\\b.(\\f.\\x.(af(bfx))))(\\f.\\x.(fx))(\\f.\\x.f(fx))";
+  char* twotimestwo = "(\\a.\\b.(\\f.\\x.(a(bf)x)))(\\f.\\x.f(fx))(\\f.\\x.f(fx))";
 
-  char** s = &omega;
+  char** s = &twotimestwo;
   expr* exp = parse_expr(s);
   print_expr(*exp);
   printf("\n");
@@ -228,6 +322,9 @@ int main(){
     while(SDL_PollEvent(&e)){
       if(e.type == SDL_QUIT){
         quit = 1;
+      }else if(e.type == SDL_KEYDOWN){
+        greedy_eval(exp);
+        print_expr(*exp); printf("\n");
       }
     }
     SDL_SetRenderDrawColor(r, 255, 255, 255, 255);

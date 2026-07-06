@@ -5,8 +5,11 @@ so I decided to try to make a small diagram generator in c.
 
 Also does the parsing of lambda expressions from strings, parser inspired from and implementation found in
 [mpu/lambda](https://github.com/mpu/lambda/).
+
+Also does "greedy" beta-reduction on button press (greedy as in it evaluates at a single step the most shallow, left-most,
+beta-reducable expression it can find).
 ## Todos
 The project core is pretty much complete, but I may add some other features to make it easier
 to use/for the hell of it.
 
-Add support for evaluating expressions (this one is supper easy so I may make it animate for extra challenge).
+Maybe add an animation for beta-reduction.
