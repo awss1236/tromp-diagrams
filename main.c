@@ -4,7 +4,7 @@
 
 #define max(x, y) ((x)>(y)?(x):(y))
 
-#define THICK 10
+#define THICK 5
 
 SDL_Window* w;
 SDL_Renderer* r;
@@ -142,34 +142,84 @@ void draw_expr(expr e, int x, int y){
   draw_expr_(e, x, y, &s);
 }
 
+void skip_whitespace(char** s){
+  while(**s && (**s == ' ' || **s == '\t' || **s == '\n')){
+    (*s)++;
+  }
+}
+
+expr* parse_expr(char** s);
+
+expr* parse_expr_part(char** s){
+  expr* out = (expr*)malloc(sizeof(expr));
+  skip_whitespace(s);
+  if(!**s){
+    goto FAIL;
+  }
+
+  if(**s == '('){
+    (*s)++;
+    out = parse_expr(s);
+    skip_whitespace(s);
+    if(!**s || **s != ')') goto FAIL;
+    (*s)++;
+    return out;
+  }
+
+  if(**s == ')'){
+    goto FAIL;
+  }
+
+  if(**s == '\\'){
+    (*s)++; skip_whitespace(s);
+    if(!**s) goto FAIL;
+    out->t = DEFN;
+    out->arg = **s;
+
+    (*s)++; skip_whitespace(s);
+    if(!**s || **s != '.') goto FAIL;
+
+    (*s)++; skip_whitespace(s);
+    out->bod = parse_expr(s);
+    return out;
+  }
+
+  out->t = SYMB;
+  out->name = **s;
+  (*s)++;
+  return out;
+FAIL:
+  free(out);
+  return NULL;
+}
+
+expr* parse_expr(char** s){
+  expr* l = parse_expr_part(s);
+  if(!l) return NULL;
+
+  expr* r;
+  while((r = parse_expr_part(s))){
+    expr* new = (expr*)malloc(sizeof(expr));
+
+    new->t = APPL;
+    new->fun = l;
+    new->par = r;
+    l = new;
+  }
+
+  return l;
+}
+
 int main(){
   SDL_Init(SDL_INIT_VIDEO);
   SDL_CreateWindowAndRenderer(400, 400, 0, &w, &r);
 
-  expr x = (expr){SYMB, .name='x'};
-  expr a = (expr){SYMB, .name='a'};
-  expr b = (expr){SYMB, .name='b'};
-  expr c = (expr){SYMB, .name='c'};
-  expr f = (expr){SYMB, .name='f'};
-  expr n = (expr){SYMB, .name='n'};
-  expr id = (expr){DEFN, .arg='x', .bod=&x};
-  expr ki = (expr){DEFN, .arg='y', .bod=&x};
-  expr k = (expr){DEFN, .arg='x', .bod=&ki};
-  expr cb = (expr){APPL, .fun=&c, .par=&b};
-  expr bx = (expr){APPL, .fun=&b, .par=&x};
-  expr abx = (expr){APPL, .fun=&a, .par=&bx};
-  expr in = (expr){DEFN, .arg='x', .bod=&abx};
-  expr cbt = (expr){APPL, .fun=&cb, .par=&in};
-  expr db = (expr){DEFN, .arg='b', .bod=&cbt};
-  expr da = (expr){DEFN, .arg='a', .bod=&db};
-  expr dc = (expr){DEFN, .arg='c', .bod=&da};
-  expr ncab = (expr){APPL, .fun=&n, .par=&dc};
-  expr l = (expr){APPL, .fun=&ncab, .par=&k};
-  expr fst = (expr){APPL, .fun=&l, .par=&id};
-  expr bo = (expr){APPL, .fun=&fst, .par=&f};
-  expr df = (expr){DEFN, .arg='f', .bod=&bo};
-  expr dn = (expr){DEFN, .arg='n', .bod=&df};
-  print_expr(dn);
+  char* fib = "\\n.\\f.n(\\c.\\a.\\b.c b(\\x.a (b x)))(\\x.\\y.x)(\\x.x)f";
+  char* omega = "(\\x.xx)(\\x.xx)";
+
+  char** s = &omega;
+  expr* exp = parse_expr(s);
+  print_expr(*exp);
   printf("\n");
 
   int quit = 0;
@@ -184,7 +234,7 @@ int main(){
     SDL_RenderClear(r);
 
     SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-    draw_expr(dn, 20, 20);
+    draw_expr(*exp, 20, 20);
 
     SDL_RenderPresent(r);
     SDL_Delay(16);
