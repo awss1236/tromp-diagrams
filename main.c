@@ -203,13 +203,13 @@ typedef struct {
   int pos;
 } strbuf_t;
 
-static void sb_append_char(strbuf_t* sb, char c){
+void sb_append_char(strbuf_t* sb, char c){
   if(sb->pos < sb->size-1){
     sb->buf[sb->pos++] = c;
   }
 }
 
-static void sb_expr(strbuf_t* sb, expr_t* e){
+void sb_expr(strbuf_t* sb, expr_t* e){
   if(e->t == SYMB){
     sb_append_char(sb, e->name);
   }else if(e->t == APPL){
