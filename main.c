@@ -1,6 +1,8 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include "font.h"
 
 #define max(x, y) ((x)>(y)?(x):(y))
 
@@ -43,7 +45,7 @@ void push_stack(stack_t* s, void* d){
 }
 
 void* pop_stack(stack_t* s){
-  if(s == NULL){
+  if(*s == NULL){
     return NULL;
   }
 
@@ -58,7 +60,6 @@ void print_expr(expr e){
   }else if(e.t == APPL){
     printf("(");
     print_expr(*e.fun);
-    printf(" ");
     print_expr(*e.par);
     printf(")");
   }else{
@@ -189,24 +190,21 @@ void free_expr(expr* e){
 expr* parse_expr(char** s);
 
 expr* parse_expr_part(char** s){
-  expr* out = make_expr();
   skip_whitespace(s);
-  if(!**s){
-    goto FAIL;
+  if(!**s || **s == ')'){
+    return NULL;
   }
 
   if(**s == '('){
     (*s)++;
-    out = parse_expr(s);
+    expr* out = parse_expr(s);
     skip_whitespace(s);
     if(!**s || **s != ')') goto FAIL;
     (*s)++;
     return out;
   }
 
-  if(**s == ')'){
-    goto FAIL;
-  }
+  expr* out = make_expr();
 
   if(**s == '\\'){
     (*s)++; skip_whitespace(s);
@@ -300,6 +298,86 @@ int greedy_eval(expr* e){
   return 0;
 }
 
+typedef struct {
+  char* buf;
+  size_t size;
+  int pos;
+} strbuf_t;
+
+static void sb_append_char(strbuf_t* sb, char c) {
+  if (sb->pos < sb->size - 1) {
+    sb->buf[sb->pos++] = c;
+  }
+}
+
+static void sb_expr(strbuf_t* sb, expr* e) {
+  if (e->t == SYMB) {
+    sb_append_char(sb, e->name);
+  } else if (e->t == APPL) {
+    sb_append_char(sb, '(');
+    sb_expr(sb, e->fun);
+    sb_expr(sb, e->par);
+    sb_append_char(sb, ')');
+  } else {
+    sb_append_char(sb, '\\');
+    sb_append_char(sb, e->arg);
+    sb_append_char(sb, '.');
+    sb_expr(sb, e->bod);
+  }
+}
+
+void expr_to_string(expr* e, char* buf, size_t size) {
+  strbuf_t sb = {buf, size, 0};
+  sb_expr(&sb, e);
+  sb_append_char(&sb, '\0');
+}
+
+int is_normal_form(expr* e) {
+  if (e->t == SYMB) return 1;
+  if (e->t == APPL) {
+    if (e->fun->t == DEFN) return 0;
+    return is_normal_form(e->fun) && is_normal_form(e->par);
+  }
+  if (e->t == DEFN) return is_normal_form(e->bod);
+  return 1;
+}
+
+void draw_char(SDL_Renderer* ren, int x, int y, char c, int scale) {
+  unsigned char ch = (unsigned char)c;
+  if (ch < FONT_FIRST || ch > FONT_LAST) ch = '?';
+  const uint8_t* glyph = font_data[ch];
+  for (int row = 0; row < FONT_ROWS; row++) {
+    for (int col = 0; col < FONT_COLS; col++) {
+      if (glyph[row] & (1 << col)) {
+        SDL_Rect rect = {x + col * scale, y + row * scale, scale, scale};
+        SDL_RenderFillRect(ren, &rect);
+      }
+    }
+  }
+}
+
+void draw_string(SDL_Renderer* ren, int x, int y, const char* s, int scale, int wrap_width) {
+  int cx = x, cy = y;
+  int cw = FONT_COLS * scale + 1;
+  int ch = FONT_ROWS * scale + 2;
+
+  while (*s) {
+    if (*s == '\n') {
+      cx = x;
+      cy += ch;
+      s++;
+      continue;
+    }
+    if (wrap_width > 0 && cx + cw > x + wrap_width) {
+      cx = x;
+      cy += ch;
+    }
+    draw_char(ren, cx, cy, *s, scale);
+    cx += cw;
+    s++;
+  }
+}
+
 int main(){
   SDL_Init(SDL_INIT_VIDEO);
   SDL_CreateWindowAndRenderer(400, 400, 0, &w, &r);
@@ -311,11 +389,13 @@ int main(){
   char* oneplustwo = "(\\a.\\b.(\\f.\\x.(af(bfx))))(\\f.\\x.(fx))(\\f.\\x.f(fx))";
   char* twotimestwo = "(\\a.\\b.(\\f.\\x.(a(bf)x)))(\\f.\\x.f(fx))(\\f.\\x.f(fx))";
 
-  char** s = &twotimestwo;
+  char** s = &oneplustwo;
   expr* exp = parse_expr(s);
   print_expr(*exp);
   printf("\n");
 
+  int steps = 0;
+  char expr_text[4096];
   int quit = 0;
   while(!quit){
     SDL_Event e;
@@ -323,15 +403,28 @@ int main(){
       if(e.type == SDL_QUIT){
         quit = 1;
       }else if(e.type == SDL_KEYDOWN){
-        greedy_eval(exp);
-        print_expr(*exp); printf("\n");
+        if (greedy_eval(exp)) {
+          steps++;
+          print_expr(*exp); printf("\n");
+        }
       }
     }
     SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
     SDL_RenderClear(r);
 
+    char status[64];
+    int len = snprintf(status, sizeof(status), "Steps: %d", steps);
+    if (is_normal_form(exp)) {
+      snprintf(status + len, sizeof(status) - len, "  [NORMAL FORM]");
+    }
     SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-    draw_expr(*exp, 20, 20);
+    draw_string(r, 5, 5, status, 2, 0);
+
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+    draw_expr(*exp, 20, 40);
+
+    expr_to_string(exp, expr_text, sizeof(expr_text));
+    draw_string(r, 5, 320, expr_text, 2, 390);
 
     SDL_RenderPresent(r);
     SDL_Delay(16);
